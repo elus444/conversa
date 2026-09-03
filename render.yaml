@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: conversa-backend
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        value: conversa
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3-flash-preview
+      - key: EMAIL
+        sync: false
+      - key: PASSWORD
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: AWS_BUCKET_NAME
+        sync: false
+      - key: AWS_ACCESS_KEY
+        sync: false
+      - key: AWS_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
