@@ -213,7 +213,7 @@ const UserProfile = () => {
         if (!file.type.startsWith("image/")) { toast.error("Please select an image file"); return }
         setAvatarUploading(true)
         try {
-            const { url, fields } = await userApi.getPresignedUrl(file.name, file.type) as { url: string; fields: Record<string, string> }
+            const { url, fields, publicUrl } = await userApi.getPresignedUrl(file.name, file.type) as { url: string; fields: Record<string, string>; publicUrl: string }
 
             const form = new FormData()
             Object.entries(fields).forEach(([k, v]) => form.append(k, v))
@@ -222,12 +222,7 @@ const UserProfile = () => {
             const upload = await fetch(url, { method: "POST", body: form })
             if (!upload.ok) throw new Error("Upload failed")
 
-            // The S3 presigned-post returns the object URL in a <Location> XML tag
-            const xml = await upload.text()
-            const loc = xml.match(/<Location>(.*?)<\/Location>/)?.[1]
-            if (!loc) throw new Error("Could not parse upload location")
-
-            const imageUrl = decodeURIComponent(loc)
+            const imageUrl = publicUrl
 
             // persist to DB
             await userApi.updateProfile({ profilePic: imageUrl })

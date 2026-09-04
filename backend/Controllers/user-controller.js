@@ -5,17 +5,23 @@ const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const User = require("../Models/User.js");
 const Conversation = require("../Models/Conversation.js");
 const {
-  AWS_BUCKET_NAME,
-  AWS_SECRET,
-  AWS_ACCESS_KEY
+  R2_ACCOUNT_ID,
+  R2_BUCKET_NAME,
+  R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY,
+  R2_PUBLIC_URL,
 } = require("../secrets.js");
 
+// R2 speaks the S3 API, but is addressed via an account-specific endpoint
+// and requires path-style bucket addressing (unlike AWS's virtual-hosted style).
 const s3Client = new S3Client({
   credentials: {
-    accessKeyId: AWS_ACCESS_KEY,
-    secretAccessKey: AWS_SECRET,
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
-  region: "ap-south-1",
+  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  region: "auto",
+  forcePathStyle: true,
 });
 
 const getPresignedUrl = async (req, res) => {
@@ -36,9 +42,11 @@ const getPresignedUrl = async (req, res) => {
   const userId = req.user.id;
 
   try {
+    const key = `conversa/${userId}/${crypto.randomUUID()}-${filename}`;
+
     const { url, fields } = await createPresignedPost(s3Client, {
-      Bucket: AWS_BUCKET_NAME,
-      Key: `conversa/${userId}/${crypto.randomUUID()}-${filename}`,
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
       Conditions: [["content-length-range", 0, 5 * 1024 * 1024]],
       Fields: {
         success_action_status: "201",
@@ -46,7 +54,13 @@ const getPresignedUrl = async (req, res) => {
       Expires: 15 * 60,
     });
 
-    return res.status(200).json({ url, fields });
+    // R2's S3-API endpoint is private (auth-only); the uploaded object is
+    // actually served from the bucket's separate public r2.dev/custom domain,
+    // so we hand the frontend that URL directly instead of making it parse
+    // the upload response (which points at the private endpoint).
+    const publicUrl = `${R2_PUBLIC_URL}/${key}`;
+
+    return res.status(200).json({ url, fields, publicUrl });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

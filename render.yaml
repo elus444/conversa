@@ -24,11 +24,15 @@ services:
         sync: false
       - key: CORS_ORIGIN
         sync: false
-      - key: AWS_BUCKET_NAME
+      - key: R2_ACCOUNT_ID
         sync: false
-      - key: AWS_ACCESS_KEY
+      - key: R2_BUCKET_NAME
         sync: false
-      - key: AWS_SECRET
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_PUBLIC_URL
         sync: false
       - key: FRONTEND_URL
         sync: false

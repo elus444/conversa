@@ -119,10 +119,10 @@ export default function MessageInput({ conversationId, myId, receiverId, receive
         if (!selectedFile) return
         setUploading(true)
         try {
-            const { url, fields } = await userApi.getPresignedUrl(
+            const { url, fields, publicUrl } = await userApi.getPresignedUrl(
                 selectedFile.name,
                 selectedFile.type
-            ) as { url: string; fields: Record<string, string> }
+            ) as { url: string; fields: Record<string, string>; publicUrl: string }
 
             const formData = new FormData()
             Object.entries(fields).forEach(([k, v]) => formData.append(k, v))
@@ -131,8 +131,7 @@ export default function MessageInput({ conversationId, myId, receiverId, receive
             const uploadRes = await fetch(url, { method: "POST", body: formData })
             if (!uploadRes.ok && uploadRes.status !== 201) throw new Error("Upload failed")
 
-            // AWS SDK v3 returns the object key as fields.key (lowercase)
-            const imageUrl = `${url}${fields.key}`
+            const imageUrl = publicUrl
             const trimmedCaption = caption.trim()
             emitSendMessage({ conversationId, imageUrl, ...(trimmedCaption && { text: trimmedCaption }), replyTo: replyToMessage?._id ?? null })
             onCancelReply?.()
