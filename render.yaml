@@ -20,9 +20,7 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3-flash-preview
-      - key: EMAIL
-        sync: false
-      - key: PASSWORD
+      - key: RESEND_API_KEY
         sync: false
       - key: CORS_ORIGIN
         sync: false

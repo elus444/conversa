@@ -1,22 +1,9 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
 const User = require("../Models/User.js");
 const Conversation = require("../Models/Conversation.js");
-const { JWT_SECRET, EMAIL, PASSWORD } = require("../secrets.js");
-
-let mailTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: EMAIL,
-    pass: PASSWORD,
-  },
-  connectionTimeout: 120000,
-  greetingTimeout: 120000,
-  socketTimeout: 120000
-});
+const { JWT_SECRET } = require("../secrets.js");
+const { sendMail } = require("../utils/mailer.js");
 
 
 const register = async (req, res) => {
@@ -208,7 +195,7 @@ const sendotp = async (req, res) => {
     await user.save();
 
     let mailDetails = {
-      from: `"Conversa" <${EMAIL}>`,
+      from: "Conversa <onboarding@resend.dev>",
       to: email,
       subject: "Your Conversa Login OTP - " + otp,
       html: `<!DOCTYPE html>
@@ -293,7 +280,7 @@ const sendotp = async (req, res) => {
 
     // Use promise-based approach
     try {
-      await mailTransporter.sendMail(mailDetails);
+      await sendMail(mailDetails);
       return res.status(200).json({ message: "OTP sent" });
     } catch (err) {
       console.error("Mail error:", err);
@@ -320,7 +307,7 @@ const sendVerificationOtp = async (req, res) => {
     await user.save();
 
     const mailDetails = {
-      from: `"Conversa" <${EMAIL}>`,
+      from: "Conversa <onboarding@resend.dev>",
       to: user.email,
       subject: `Verify your Conversa email – OTP: ${otp}`,
       html: `<!DOCTYPE html>
@@ -388,7 +375,7 @@ const sendVerificationOtp = async (req, res) => {
     };
 
     try {
-      await mailTransporter.sendMail(mailDetails);
+      await sendMail(mailDetails);
       return res.status(200).json({ message: "Verification OTP sent" });
     } catch (err) {
       console.error("Mail error:", err);
