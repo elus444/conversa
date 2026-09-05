@@ -519,9 +519,17 @@ export default function ConversationDetail() {
     useEffect(() => {
         const onEdited = (data: { messageId: string; conversationId: string; text: string; editedAt: string }) => {
             if (data.conversationId !== id) return
-            setMessageList((prev) =>
-                prev.map((m) => m._id === data.messageId ? { ...m, text: data.text, editedAt: data.editedAt } : m)
-            )
+            setMessageList((prev) => {
+                // If the edited message is the last one, the sidebar preview
+                // needs the new text too — the server already updated it in
+                // the DB, this just keeps the currently-rendered list in sync.
+                if (prev[prev.length - 1]?._id === data.messageId) {
+                    setConversationsList((cs) =>
+                        cs.map((c) => c._id === id ? { ...c, latestmessage: data.text } : c)
+                    )
+                }
+                return prev.map((m) => m._id === data.messageId ? { ...m, text: data.text, editedAt: data.editedAt } : m)
+            })
         }
         const onReaction = (data: { messageId: string; conversationId: string; reactions: Message["reactions"] }) => {
             if (data.conversationId !== id) return
