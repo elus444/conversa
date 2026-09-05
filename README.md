@@ -2,6 +2,7 @@
 
 <div align="center">
 
+[![CI](https://github.com/elus444/conversa/actions/workflows/ci.yml/badge.svg)](https://github.com/elus444/conversa/actions/workflows/ci.yml)
 ![MongoDB](https://img.shields.io/badge/MongoDB-%2347A248.svg?style=flat&logo=mongodb&logoColor=white)
 ![Express.js](https://img.shields.io/badge/Express.js-%23000000.svg?style=flat&logo=express&logoColor=white)
 ![React](https://img.shields.io/badge/React%2019-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB)
@@ -9,11 +10,17 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white)
 ![Socket.IO](https://img.shields.io/badge/Socket.IO-%23000000.svg?style=flat&logo=socket.io&logoColor=white)
 ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4-%2306B6D4.svg?style=flat&logo=tailwindcss&logoColor=white)
-![Amazon S3](https://img.shields.io/badge/Amazon%20S3-FF9900?style=flat&logo=amazons3&logoColor=white)
+![Cloudflare](https://img.shields.io/badge/Cloudflare%20R2-F38020?style=flat&logo=cloudflare&logoColor=white)
 ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-AI-4285F4?style=flat&logo=google&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)
 
-A full-stack, production-grade real-time chat application built with the MERN stack and Socket.IO. Features include one-on-one messaging, a personalised AI chatbot powered by Google Gemini, image sharing via AWS S3, email verification, email notifications, and a fully responsive dark/light UI built with React 19, TypeScript, Tailwind CSS v4, and shadcn/ui components.
+A full-stack, production-grade real-time chat application built with the MERN stack and Socket.IO. Features include one-on-one messaging, a personalised AI chatbot powered by Google Gemini, image sharing via Cloudflare R2, email verification, email notifications, and a fully responsive dark/light UI built with React 19, TypeScript, Tailwind CSS v4, and shadcn/ui components.
+
+### 🔗 [**Live Demo**](https://conversa-elham.pages.dev) — no signup needed, click **"Try as guest"**
+
+[![Conversa screenshot](screenshots/banner.png)](https://conversa-elham.pages.dev)
+
+**Deployed entirely on free tiers** — Cloudflare Pages (frontend) + Render (backend) + MongoDB Atlas + Cloudflare R2 (storage) + Resend (email) + Google AI Studio (Gemini). $0/month.
 
 </div>
 
@@ -32,7 +39,9 @@ A full-stack, production-grade real-time chat application built with the MERN st
 - [Getting Started](#getting-started)
   - [Docker (recommended)](#docker-recommended)
   - [Manual (local development)](#manual-local-development)
+- [Production Deployment](#production-deployment)
 - [Scripts](#scripts)
+- [Testing & CI](#testing--ci)
 - [Security Design](#security-design)
 - [Background Jobs](#background-jobs)
 - [License](#license)
@@ -43,19 +52,20 @@ A full-stack, production-grade real-time chat application built with the MERN st
 
 ### Authentication & Email Verification
 - **Register / Login** with email and password (bcrypt hashed, JWT issued with 7-day expiry)
-- **OTP Login** — request a one-time password sent via Nodemailer / Gmail SMTP; time-limited (5 min), bcrypt-stored
+- **OTP Login** — request a one-time password sent via Resend; time-limited (5 min), bcrypt-stored
 - **Email verification** — after registration (or on first login for existing accounts), users must verify their email with a 6-digit OTP before accessing the dashboard; unverified users are always redirected to `/verify-email`
 - **Persistent sessions** — JWT stored in `localStorage`; `auth-token` header used on every API call
+- **Guest demo account** — "Try as guest" on the landing page logs straight into a pre-seeded, pre-verified account with populated conversations, so evaluating the app doesn't require signing up or waiting on an email
 - **Account deletion** — soft-anonymises the account (clears name, email, bio, credentials) while preserving conversation history for other participants
 
 ### Profile Management
 - Update name, about text, and profile picture
 - Change password (old password verification required)
-- Profile pictures uploaded directly from the browser to AWS S3 via pre-signed POST URLs (max 5 MB, images only); removal resets to a generated ui-avatars.com URL
+- Profile pictures uploaded directly from the browser to Cloudflare R2 via pre-signed POST URLs (max 5 MB, images only); removal resets to a generated ui-avatars.com URL
 
 ### Messaging
 - **Real-time one-on-one chat** over Socket.IO
-- **Text and image messages** — images uploaded to S3 with optional caption text
+- **Text and image messages** — images uploaded to Cloudflare R2 with optional caption text
 - **Reply to message** — `replyTo` reference stored per message; displayed as quoted context in the UI
 - **Delete for me** — hard-removes a message from your view only (appended to `hiddenFrom`)
 - **Delete for everyone** — soft-delete sets `softDeleted: true`; message shows as *"This message was deleted"* tombstone for all members
@@ -117,8 +127,8 @@ A full-stack, production-grade real-time chat application built with the MERN st
 | **Real-time** | Socket.IO 4 (server + client) |
 | **Authentication** | JSON Web Tokens (jsonwebtoken), bcryptjs |
 | **AI** | Google Gemini via `@google/genai` |
-| **File Storage** | AWS S3 (pre-signed POST uploads) |
-| **Email** | Nodemailer (Gmail SMTP) — OTP login, email verification, message notifications |
+| **File Storage** | Cloudflare R2 (pre-signed POST uploads) |
+| **Email** | Resend — OTP login, email verification, message notifications |
 | **Containerisation** | Docker, Docker Compose |
 
 ---
@@ -132,15 +142,17 @@ conversa/
 │
 ├── backend/
 │   ├── Dockerfile
-│   ├── index.js                       # Express app entry point, HTTP server, Socket.IO init
+│   ├── index.js                       # Server bootstrap: HTTP server, Socket.IO init, DB connect, listen
+│   ├── app.js                         # Express app + middleware/routes only (no side effects — testable)
 │   ├── db.js                          # MongoDB connection
 │   ├── secrets.js                     # Environment variable exports
+│   ├── __tests__/                     # Jest + Supertest (see Testing & CI)
 │   ├── Controllers/
 │   │   ├── auth-controller.js         # register, login, OTP login, authUser,
 │   │   │                              #   sendVerificationOtp, verifyEmail
 │   │   ├── conversation-controller.js # create, list, get, togglePin
 │   │   ├── message-controller.js      # allMessage, delete, bulkHide, star, clear, AI streaming
-│   │   └── user-controller.js         # updateProfile, block, S3 presign, user search,
+│   │   └── user-controller.js         # updateProfile, block, R2 presign, user search,
 │   │                                  #   deleteAccount, getBlockStatus
 │   ├── Models/
 │   │   ├── User.js                    # Full user schema (see Data Models)
@@ -162,7 +174,8 @@ conversa/
 │   │   └── staleOnlineUsers.js        # Hourly cleanup of stale isOnline flags
 │   └── scripts/
 │       ├── seed-test-users.js
-│       └── delete-test-users.js
+│       ├── delete-test-users.js
+│       └── seed-demo-account.js       # Permanent guest account + populated conversations
 │
 └── frontend/
     ├── Dockerfile
@@ -200,7 +213,7 @@ conversa/
 ```
 Browser ──HTTP──▶  Express REST API  ──▶  MongoDB
         ──WS────▶  Socket.IO Server  ──▶  MongoDB
-                                     ──▶  Gmail SMTP (offline email notifications)
+                                     ──▶  Resend (offline email notifications)
 
 Socket.IO authentication
   Every socket connection presents a JWT in handshake.auth.token.
@@ -263,7 +276,7 @@ AI streaming pipeline
 | `conversationId` | ObjectId → Conversation | required |
 | `senderId` | ObjectId → User | required |
 | `text` | String | required if no `imageUrl` |
-| `imageUrl` | String | required if no `text`; S3 URL |
+| `imageUrl` | String | required if no `text`; R2 URL |
 | `seenBy` | [{user, seenAt}] | read receipts |
 | `hiddenFrom` | [ObjectId → User] | hard-deleted for these users |
 | `softDeleted` | Boolean | `true` = "deleted" tombstone shown to all |
@@ -315,7 +328,7 @@ All protected routes require the header `auth-token: <JWT>`.
 | `PUT` | `/user/update` | ✅ | Update profile (name, about, profilePic, password, emailNotificationsEnabled) |
 | `GET` | `/user/online-status/:id` | ✅ | Get online status of a user |
 | `GET` | `/user/non-friends` | ✅ | Paginated, searchable, sortable user discovery |
-| `GET` | `/user/presigned-url` | ✅ | Get S3 pre-signed POST URL for image upload |
+| `GET` | `/user/presigned-url` | ✅ | Get R2 pre-signed POST URL for image upload |
 | `POST` | `/user/block/:id` | ✅ | Block a user |
 | `DELETE` | `/user/block/:id` | ✅ | Unblock a user |
 | `GET` | `/user/block-status/:id` | ✅ | Get mutual block status between current user and target |
@@ -386,18 +399,19 @@ JWT_SECRET=change_me_to_a_long_random_secret
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-3-flash-preview
 
-# ── Email (Gmail SMTP) ────────────────────────────────────────────────────────
+# ── Email (Resend) ────────────────────────────────────────────────────────────
 # Used for: OTP login, email verification, offline message notifications
-EMAIL=your_gmail@gmail.com
-PASSWORD=your_gmail_app_password   # use a Gmail App Password, not your account password
+RESEND_API_KEY=your_resend_api_key
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 CORS_ORIGIN=*                      # restrict to your frontend origin in production
 
-# ── AWS S3 (profile picture uploads) ─────────────────────────────────────────
-AWS_BUCKET_NAME=your_s3_bucket_name
-AWS_ACCESS_KEY=your_aws_access_key
-AWS_SECRET=your_aws_secret_key
+# ── Cloudflare R2 (profile picture uploads) ─────────────────────────────────────────
+R2_ACCOUNT_ID=your_cloudflare_account_id
+R2_BUCKET_NAME=your_r2_bucket_name
+R2_ACCESS_KEY_ID=your_r2_access_key_id
+R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
+R2_PUBLIC_URL=https://pub-xxxxxxxx.r2.dev
 
 # ── App URL (used in email notification deep-links) ───────────────────────────
 FRONTEND_URL=http://localhost:5173
@@ -422,7 +436,7 @@ cd conversa
 
 # 2. Create your .env from the template
 cp .env.example .env
-# Edit .env — set JWT_SECRET, GEMINI_API_KEY, EMAIL, PASSWORD, AWS_*, etc.
+# Edit .env — set JWT_SECRET, GEMINI_API_KEY, RESEND_API_KEY, R2_*, etc.
 
 # 3. Build and start all three services (mongo + backend + frontend)
 docker compose up --build -d
@@ -455,6 +469,23 @@ npm run dev            # Vite dev server — listens on :5173
 
 ---
 
+## Production Deployment
+
+The live demo runs on entirely free-tier infrastructure, spread across the providers each free tier suits best:
+
+| Piece | Provider | Notes |
+|---|---|---|
+| Frontend | [Cloudflare Pages](https://pages.cloudflare.com/) | Static Vite build, deployed via `wrangler pages deploy` |
+| Backend | [Render](https://render.com/) | Free web service, defined by [`render.yaml`](render.yaml) (Blueprint) |
+| Database | [MongoDB Atlas](https://www.mongodb.com/atlas) | Free M0 shared cluster |
+| File storage | [Cloudflare R2](https://developers.cloudflare.com/r2/) | S3-API-compatible; presigned **PUT** uploads (R2 doesn't implement S3's presigned-POST) |
+| Email | [Resend](https://resend.com/) | Render blocks outbound SMTP ports by default, so mail goes over Resend's HTTPS API instead of SMTP |
+| AI | [Google AI Studio](https://aistudio.google.com/) | Gemini API, free tier |
+
+Two things worth calling out for anyone repeating this setup:
+- **R2 has no presigned-POST support** — `getPresignedUrl` signs a `PutObjectCommand` via `@aws-sdk/s3-request-presigner` instead of `@aws-sdk/s3-presigned-post`, and the frontend does a plain `fetch(url, { method: "PUT", body: file })` rather than building multipart form data.
+- **The AWS SDK's newer default checksum behavior breaks R2** — `requestChecksumCalculation`/`responseChecksumValidation` must be set to `"WHEN_REQUIRED"` on the `S3Client`, or every request gets rejected.
+
 ## Scripts
 
 ### Backend (`backend/`)
@@ -463,8 +494,10 @@ npm run dev            # Vite dev server — listens on :5173
 |---|---|---|
 | `start` | `node index.js` | Start production server |
 | `dev` | `nodemon index.js` | Start dev server with hot-reload |
+| `test` | `jest --runInBand` | Run the backend test suite |
 | `seed:users` | `node scripts/seed-test-users.js` | Seed a set of test users |
 | `delete:users` | `node scripts/delete-test-users.js` | Remove seeded test users |
+| `seed:demo` | `node scripts/seed-demo-account.js` | Seed the permanent guest/demo account used by "Try as guest" on the landing page |
 
 ### Frontend (`frontend/`)
 
@@ -479,6 +512,15 @@ npm run dev            # Vite dev server — listens on :5173
 
 ---
 
+## Testing & CI
+
+- **Backend** — Jest + Supertest. `app.js` exports the configured Express app separately from `index.js`'s server-startup logic (DB connect, socket.io, `http.listen`), so routes and middleware can be exercised directly in tests with no live database or network calls required:
+  - `middleware/fetchUser.js` — token presence/validity/signature cases
+  - `Controllers/user-controller.js` (`getPresignedUrl`) — file-type and size-limit validation
+  - `app.js` — health check, security headers, auth-gate and validation responses via Supertest
+- **CI** — GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push/PR to `main`: backend tests (`npm test`) and a frontend job (`eslint` + a full `tsc -b && vite build`) in parallel.
+- Run locally: `cd backend && npm test`
+
 ## Security Design
 
 - **JWT** — tokens are signed with `JWT_SECRET`, expire after 7 days, and are verified on every protected REST route and every socket connection
@@ -487,7 +529,9 @@ npm run dev            # Vite dev server — listens on :5173
 - **Block enforcement** — the server checks block status before processing every `send-message` event; a blocked sender receives `message-blocked` instead
 - **Conversation membership** — every `join-chat` and `send-message` handler verifies the authenticated user is a member of the target conversation
 - **Email verification gate** — the `DashboardLayout` component redirects unverified users to `/verify-email` before they can access any chat functionality; bot accounts are pre-verified at creation
-- **S3 pre-signed uploads** — the client never receives AWS credentials; uploads go directly to S3 through a short-lived pre-signed POST URL generated server-side
+- **R2 pre-signed uploads** — the client never receives storage credentials; uploads go directly to Cloudflare R2 through a short-lived pre-signed URL generated server-side, with size/type enforced by the signature itself
+- **Rate limiting** — `express-rate-limit` caps auth endpoints at 30 requests/15min per IP (300/15min for the general API) to blunt brute-force and abuse
+- **Security headers** — `helmet` sets standard hardening headers (`X-Content-Type-Options`, HSTS, etc.) on every response
 - **Non-root Docker user** — the backend container runs as an unprivileged `appuser`
 - **Account anonymisation** — deleted accounts have credentials wiped and PII replaced with generic values; the document is retained (flagged `isDeleted: true`) to preserve conversation context for other participants
 
