@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-const { S3Client } = require("@aws-sdk/client-s3");
-const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const User = require("../Models/User.js");
 const Conversation = require("../Models/Conversation.js");
 const {
@@ -22,12 +22,19 @@ const s3Client = new S3Client({
   endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   region: "auto",
   forcePathStyle: true,
+  // Newer SDK versions default to attaching a checksum to every request,
+  // which R2 doesn't support and rejects with a signature/access error.
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 const getPresignedUrl = async (req, res) => {
 
   const filename = req.query.filename;
   const filetype = req.query.filetype;
+  const filesize = Number(req.query.filesize);
 
   if (!filename || !filetype) {
     return res
@@ -39,28 +46,35 @@ const getPresignedUrl = async (req, res) => {
     return res.status(400).json({ error: "Invalid file type" });
   }
 
+  if (!Number.isFinite(filesize) || filesize <= 0 || filesize > MAX_UPLOAD_BYTES) {
+    return res.status(400).json({ error: "File must be between 1 byte and 5MB" });
+  }
+
   const userId = req.user.id;
 
   try {
     const key = `conversa/${userId}/${crypto.randomUUID()}-${filename}`;
 
-    const { url, fields } = await createPresignedPost(s3Client, {
+    // R2 doesn't implement S3's presigned-POST (form upload) API, only
+    // presigned requests for individual operations — so we sign a PUT
+    // instead. Signing ContentLength/ContentType here means the browser's
+    // upload request must match exactly, which is what enforces the size
+    // and type limits (there's no "Conditions" policy like presigned POST had).
+    const command = new PutObjectCommand({
       Bucket: R2_BUCKET_NAME,
       Key: key,
-      Conditions: [["content-length-range", 0, 5 * 1024 * 1024]],
-      Fields: {
-        success_action_status: "201",
-      },
-      Expires: 15 * 60,
+      ContentType: filetype,
+      ContentLength: filesize,
     });
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 15 * 60 });
 
     // R2's S3-API endpoint is private (auth-only); the uploaded object is
     // actually served from the bucket's separate public r2.dev/custom domain,
-    // so we hand the frontend that URL directly instead of making it parse
-    // the upload response (which points at the private endpoint).
+    // so we hand the frontend that URL directly instead of deriving it from
+    // the upload endpoint.
     const publicUrl = `${R2_PUBLIC_URL}/${key}`;
 
-    return res.status(200).json({ url, fields, publicUrl });
+    return res.status(200).json({ url, publicUrl });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

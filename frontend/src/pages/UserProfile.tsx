@@ -211,15 +211,16 @@ const UserProfile = () => {
     /* ── profile-pic upload ─────────────────────────────────────────────── */
     const handleAvatarChange = async (file: File) => {
         if (!file.type.startsWith("image/")) { toast.error("Please select an image file"); return }
+        if (file.size > 5 * 1024 * 1024) { toast.error("Image must be smaller than 5 MB."); return }
         setAvatarUploading(true)
         try {
-            const { url, fields, publicUrl } = await userApi.getPresignedUrl(file.name, file.type) as { url: string; fields: Record<string, string>; publicUrl: string }
+            const { url, publicUrl } = await userApi.getPresignedUrl(file.name, file.type, file.size) as { url: string; publicUrl: string }
 
-            const form = new FormData()
-            Object.entries(fields).forEach(([k, v]) => form.append(k, v))
-            form.append("file", file)
-
-            const upload = await fetch(url, { method: "POST", body: form })
+            const upload = await fetch(url, {
+                method: "PUT",
+                body: file,
+                headers: { "Content-Type": file.type },
+            })
             if (!upload.ok) throw new Error("Upload failed")
 
             const imageUrl = publicUrl

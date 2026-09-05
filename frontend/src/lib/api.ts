@@ -204,9 +204,9 @@ export const userApi = {
             body: JSON.stringify(payload),
         }).then(handleResponse),
 
-    getPresignedUrl: (filename: string, filetype: string) =>
+    getPresignedUrl: (filename: string, filetype: string, filesize: number) =>
         fetch(
-            `${API_BASE}/user/presigned-url?filename=${encodeURIComponent(filename)}&filetype=${encodeURIComponent(filetype)}`,
+            `${API_BASE}/user/presigned-url?filename=${encodeURIComponent(filename)}&filetype=${encodeURIComponent(filetype)}&filesize=${filesize}`,
             { headers: headers() }
         ).then(handleResponse),
 
