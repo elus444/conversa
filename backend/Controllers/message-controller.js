@@ -277,6 +277,114 @@ const sendMessageHandler = async (data) => {
 };
 
 /**
+ * Used by the socket handler for real-time message editing.
+ * Only the original sender may edit, only text messages (not images), and
+ * not once soft-deleted. Editing an image caption isn't supported — this
+ * only ever touches the `text` field.
+ * No edit history is kept; `editedAt` just flags that it happened.
+ * Returns the updated message, or false if the edit isn't allowed.
+ */
+const editMessageHandler = async ({ messageId, requesterId, newText }) => {
+  const trimmed = (newText || "").trim();
+  if (!trimmed) return false;
+
+  try {
+    const message = await Message.findById(messageId);
+    if (!message) return false;
+    if (message.senderId.toString() !== requesterId.toString()) return false;
+    if (message.softDeleted) return false;
+    if (!message.text) return false; // image-only message, nothing to edit
+
+    message.text = trimmed;
+    message.editedAt = new Date();
+    await message.save();
+    return message;
+  } catch (error) {
+    console.log(error.message);
+    return false;
+  }
+};
+
+/**
+ * Used by the socket handler for real-time reactions.
+ * One emoji per user per message — reacting again with a different emoji
+ * replaces it; reacting again with the SAME emoji removes it (toggle).
+ * Any conversation member may react, not just the sender.
+ * Returns the updated message, or false if the reaction isn't allowed.
+ */
+const toggleReactionHandler = async ({ messageId, userId, emoji }) => {
+  if (!emoji) return false;
+
+  try {
+    const message = await Message.findById(messageId);
+    if (!message) return false;
+
+    const conversation = await Conversation.findById(message.conversationId);
+    const isMember = conversation?.members.some((m) => m.toString() === userId.toString());
+    if (!isMember) return false;
+
+    const existingIndex = message.reactions.findIndex(
+      (r) => r.user.toString() === userId.toString()
+    );
+
+    if (existingIndex === -1) {
+      message.reactions.push({ user: userId, emoji });
+    } else if (message.reactions[existingIndex].emoji === emoji) {
+      message.reactions.splice(existingIndex, 1); // same emoji again → remove
+    } else {
+      message.reactions[existingIndex].emoji = emoji; // different emoji → replace
+    }
+
+    await message.save();
+    return message;
+  } catch (error) {
+    console.log(error.message);
+    return false;
+  }
+};
+
+/**
+ * GET /api/message/search?q=...&conversationId=...
+ * Full-text search over message text using MongoDB's text index.
+ * Scoped to a single conversation if `conversationId` is given, otherwise
+ * searches every conversation the requester is a member of.
+ * Soft-deleted and self-hidden messages are excluded, same as allMessage.
+ */
+const searchMessages = async (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (!q) return res.status(400).json({ error: "Query parameter 'q' is required" });
+
+  try {
+    const filter = {
+      $text: { $search: q },
+      hiddenFrom: { $ne: req.user.id },
+      softDeleted: { $ne: true },
+    };
+
+    if (req.query.conversationId) {
+      const conversation = await Conversation.findById(req.query.conversationId);
+      const isMember = conversation?.members.some((m) => m.toString() === req.user.id);
+      if (!isMember) return res.status(403).json({ error: "Forbidden" });
+      filter.conversationId = req.query.conversationId;
+    } else {
+      const memberOf = await Conversation.find({ members: req.user.id }, "_id");
+      filter.conversationId = { $in: memberOf.map((c) => c._id) };
+    }
+
+    const results = await Message.find(filter, { score: { $meta: "textScore" } })
+      .sort({ score: { $meta: "textScore" } })
+      .limit(50)
+      .populate("senderId", "name profilePic")
+      .lean();
+
+    res.json({ results });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+/**
  * Used by the socket handler for real-time delete.
  * scope="everyone" → soft-delete (sets softDeleted=true), only sender allowed.
  * scope="me"       → adds requesterId to hiddenFrom.
@@ -396,6 +504,9 @@ module.exports = {
   clearChat,
   sendMessageHandler,
   deleteMessageHandler,
+  editMessageHandler,
+  toggleReactionHandler,
+  searchMessages,
   toggleStar,
   getStarredMessages,
 };

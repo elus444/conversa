@@ -8,10 +8,12 @@ const {
   clearChat,
   toggleStar,
   getStarredMessages,
+  searchMessages,
 } = require("../Controllers/message-controller.js");
 const fetchuser = require("../middleware/fetchUser.js");
 
 router.get("/starred", fetchuser, getStarredMessages);
+router.get("/search", fetchuser, searchMessages);
 router.get("/:id", fetchuser, allMessage);
 router.delete("/bulk/hide", fetchuser, bulkHide);
 router.delete("/:id", fetchuser, deleteMessage);

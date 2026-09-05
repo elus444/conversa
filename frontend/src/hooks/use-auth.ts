@@ -22,8 +22,8 @@ export const useAuthProvider = () => {
     const [user, setUser] = useState<User | null>(null);
     const [isUserLoading, setIsUserLoading] = useState(true);
 
-    const _postLogin = async (token: string, userData?: User | null) => {
-        localStorage.setItem("auth-token", token);
+    const _postLogin = async (token: string, refreshToken?: string, userData?: User | null) => {
+        authApi.storeTokens(token, refreshToken);
         if (userData) {
             setUser(userData as User);
         } else {
@@ -36,21 +36,25 @@ export const useAuthProvider = () => {
 
     const login = async (email: string, password: string) => {
         const data = await authApi.login({ email, password });
-        await _postLogin(data.authtoken, data.user as User | undefined);
+        await _postLogin(data.authtoken, data.refreshToken, data.user as User | undefined);
     };
 
     const loginWithOtp = async (email: string, otp: string) => {
         const data = await authApi.login({ email, otp });
-        await _postLogin(data.authtoken, data.user as User | undefined);
+        await _postLogin(data.authtoken, data.refreshToken, data.user as User | undefined);
     };
 
     const register = async (name: string, email: string, password: string) => {
         const data = await authApi.register({ name, email, password });
-        await _postLogin(data.authtoken);
+        await _postLogin(data.authtoken, data.refreshToken);
     };
 
     const logout = () => {
+        // Best-effort server-side revocation of the refresh token — fires
+        // and forgets, the client clears its own state regardless.
+        authApi.logout();
         localStorage.removeItem("auth-token");
+        localStorage.removeItem("refresh-token");
         disconnectSocket();
         setUser(null);
     };
@@ -65,13 +69,17 @@ export const useAuthProvider = () => {
             }
 
             try {
+                // Goes through apiFetch under the hood, so if this access token
+                // has already expired by the time the page loads, it transparently
+                // refreshes before this call resolves — no separate check needed.
                 const user = await authApi.getMe<User>();
                 setUser(user);
 
-                connectSocket(token);
+                connectSocket(localStorage.getItem("auth-token") ?? token);
                 emitSetup();
             } catch {
                 localStorage.removeItem("auth-token");
+                localStorage.removeItem("refresh-token");
             } finally {
                 setIsUserLoading(false);
             }

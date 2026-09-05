@@ -74,11 +74,28 @@ const Userschema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Refresh-token strategy: the access token (JWT) is short-lived (see
+    // JWT_ACCESS_EXPIRY); this stores a hash of the current refresh token
+    // (never the raw token) plus its expiry, so /auth/refresh can verify
+    // and rotate it. One active refresh token per user — logging in again
+    // (or on a second device) invalidates the previous one.
+    refreshTokenHash: {
+      type: String,
+      default: null,
+    },
+    refreshTokenExpiry: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// getNonFriendsList (user-controller.js) searches/sorts on name and lastSeen.
+Userschema.index({ name: 1 });
+Userschema.index({ lastSeen: -1 });
 
 const User = mongoose.model("User", Userschema);
 module.exports = User;

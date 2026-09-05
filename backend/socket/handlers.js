@@ -5,6 +5,8 @@ const {
   streamAiResponse,
   sendMessageHandler,
   deleteMessageHandler,
+  editMessageHandler,
+  toggleReactionHandler,
 } = require("../Controllers/message-controller.js");
 const sendMessageEmail = require("../utils/sendMessageEmail.js");
 
@@ -117,7 +119,7 @@ module.exports = (io, socket, userSocketMap) => {
     try {
       console.log("Received message");
 
-      const { conversationId, text, imageUrl, replyTo } = data;
+      const { conversationId, text, imageUrl, replyTo, clientTempId } = data;
       // Always use the authenticated user as the sender — never trust client-supplied senderId
       const senderId = currentUserId;
 
@@ -150,8 +152,11 @@ module.exports = (io, socket, userSocketMap) => {
         try {
           for await (const event of streamAiResponse(text, senderId, conversationId)) {
             if (event.type === "user-message") {
-              // Emit real user message (has a proper MongoDB _id)
-              io.to(conversationId).emit("receive-message", event.message);
+              // Emit real user message (has a proper MongoDB _id). clientTempId
+              // rides along unchanged so the sender can reconcile it against
+              // their own optimistic placeholder — see api usage in
+              // MessageInput.tsx / ConversationDetail.tsx.
+              io.to(conversationId).emit("receive-message", { ...event.message.toObject(), clientTempId });
               // Now start the typing indicator (conversationId required by frontend)
               io.to(conversationId).emit("typing", { typer: botId, conversationId });
             } else if (event.type === "chunk") {
@@ -225,7 +230,7 @@ module.exports = (io, socket, userSocketMap) => {
         replyTo: replyTo || null,
       });
 
-      io.to(conversationId).emit("receive-message", message);
+      io.to(conversationId).emit("receive-message", { ...message.toObject(), clientTempId });
 
       conversation.unreadCounts = conversation.unreadCounts.map((unread) => {
         if (unread.userId.toString() === receiverId.toString()) {
@@ -333,6 +338,63 @@ module.exports = (io, socket, userSocketMap) => {
   };
 
   socket.on('delete-message', handleDeleteMessage);
+
+  // ─── Edit message ──────────────────────────────────────────────────────────
+  const handleEditMessage = async (data) => {
+    try {
+      const { messageId, conversationId, text } = data;
+      const updated = await editMessageHandler({
+        messageId,
+        requesterId: currentUserId,
+        newText: text,
+      });
+      if (!updated) return;
+
+      // If this was the conversation's latest message, keep the sidebar preview in sync.
+      const conversation = await Conversation.findById(conversationId);
+      if (conversation) {
+        const latest = await Message.findOne({ conversationId }).sort({ createdAt: -1 });
+        if (latest && latest._id.toString() === messageId) {
+          conversation.latestmessage = updated.text;
+          await conversation.save({ timestamps: false });
+        }
+      }
+
+      io.to(conversationId).emit('message-edited', {
+        messageId,
+        conversationId,
+        text: updated.text,
+        editedAt: updated.editedAt,
+      });
+    } catch (error) {
+      console.error('Error in edit-message handler:', error);
+    }
+  };
+
+  socket.on('edit-message', handleEditMessage);
+
+  // ─── Message reactions ─────────────────────────────────────────────────────
+  const handleReactMessage = async (data) => {
+    try {
+      const { messageId, conversationId, emoji } = data;
+      const updated = await toggleReactionHandler({
+        messageId,
+        userId: currentUserId,
+        emoji,
+      });
+      if (!updated) return;
+
+      io.to(conversationId).emit('message-reaction', {
+        messageId,
+        conversationId,
+        reactions: updated.reactions,
+      });
+    } catch (error) {
+      console.error('Error in react-message handler:', error);
+    }
+  };
+
+  socket.on('react-message', handleReactMessage);
 
   // ─── Typing indicators ─────────────────────────────────────────────────────
   // Helper: emit a typing event to everyone in the conversation room, and also

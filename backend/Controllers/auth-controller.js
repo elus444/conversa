@@ -1,10 +1,36 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../Models/User.js");
 const Conversation = require("../Models/Conversation.js");
-const { JWT_SECRET } = require("../secrets.js");
+const { JWT_SECRET, JWT_ACCESS_EXPIRY, JWT_REFRESH_EXPIRY_DAYS } = require("../secrets.js");
 const { sendMail } = require("../utils/mailer.js");
 
+/**
+ * Refresh-token strategy:
+ *  - Access token (`authtoken`): a short-lived JWT (default 15m), verified by
+ *    fetchUser on every request exactly as before — no change to that flow.
+ *  - Refresh token: an opaque, high-entropy random string, sent to the client
+ *    once and never again. Only its SHA-256 hash is stored (User.refreshTokenHash),
+ *    so a database read alone can't be used to authenticate as the user.
+ *    SHA-256 (not bcrypt) is used deliberately: the token already has far more
+ *    entropy than a password, so bcrypt's slow, salted hashing buys nothing here
+ *    and would prevent the direct-lookup-by-hash that /auth/refresh depends on.
+ *  - One active refresh token per user — issuing a new one (login, or a prior
+ *    refresh) invalidates whatever came before it (rotation).
+ */
+const issueTokens = async (user) => {
+  const authtoken = jwt.sign({ user: { id: user.id } }, JWT_SECRET, {
+    expiresIn: JWT_ACCESS_EXPIRY,
+  });
+
+  const refreshToken = crypto.randomBytes(40).toString("hex");
+  user.refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+  user.refreshTokenExpiry = new Date(Date.now() + JWT_REFRESH_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+  await user.save();
+
+  return { authtoken, refreshToken };
+};
 
 const register = async (req, res) => {
   // Registration involves 3 dependent DB writes:
@@ -72,15 +98,10 @@ const register = async (req, res) => {
       ],
     });
 
-    const data = {
-      user: {
-        id: newUser.id,
-      },
-    };
-
-    const authtoken = jwt.sign(data, JWT_SECRET, { expiresIn: "7d" });
+    const { authtoken, refreshToken } = await issueTokens(newUser);
     res.json({
       authtoken,
+      refreshToken,
     });
   } catch (error) {
     // Something went wrong during one of the DB writes.
@@ -142,16 +163,11 @@ const login = async (req, res) => {
       }
     }
 
-    const data = {
-      user: {
-        id: user.id,
-      },
-    };
-
-    const authtoken = jwt.sign(data, JWT_SECRET, { expiresIn: "7d" });
+    const { authtoken, refreshToken } = await issueTokens(user);
 
     res.json({
       authtoken,
+      refreshToken,
       user: {
         _id: user.id,
         name: user.name,
@@ -171,6 +187,55 @@ const authUser = async (req, res) => {
     // we get req.user from the fetchuser middleware, which verifies the JWT and extracts the user ID
     const user = await User.findById(req.user.id).select("-password");
     res.json(user);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+/**
+ * POST /auth/refresh
+ * body: { refreshToken }
+ * Public route (no fetchUser) — this is exactly how a client gets a new
+ * access token once the old one has expired, so it can't require one.
+ * Rotates the refresh token on every use: the old one stops working the
+ * moment a new one is issued, whether or not the client actually saves it.
+ */
+const refreshAccessToken = async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ error: "refreshToken is required" });
+  }
+
+  try {
+    const hash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+    const user = await User.findOne({ refreshTokenHash: hash });
+
+    if (!user || !user.refreshTokenExpiry || user.refreshTokenExpiry < new Date()) {
+      return res.status(401).json({ error: "Invalid or expired refresh token" });
+    }
+
+    const tokens = await issueTokens(user);
+    res.json(tokens);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+/**
+ * POST /auth/logout
+ * Invalidates the refresh token server-side so it can't be used again even
+ * if it leaked. The access token itself can't be revoked (it's stateless),
+ * but it's short-lived and expires on its own shortly after.
+ */
+const logout = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.user.id, {
+      refreshTokenHash: null,
+      refreshTokenExpiry: null,
+    });
+    res.status(200).json({ message: "Logged out" });
   } catch (error) {
     console.error(error.message);
     res.status(500).send("Internal Server Error");
@@ -425,4 +490,6 @@ module.exports = {
   sendotp,
   sendVerificationOtp,
   verifyEmail,
+  refreshAccessToken,
+  logout,
 };

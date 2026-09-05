@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useChat, type Message } from "@/hooks/use-chat"
 import { useConversations } from "@/hooks/use-conversations"
 import { conversationApi, messageApi, userApi } from "@/lib/api"
-import socket, { emitJoinChat, emitLeaveChat, emitDeleteMessage } from "@/lib/socket"
+import socket, { emitJoinChat, emitLeaveChat, emitDeleteMessage, emitEditMessage, emitReactMessage } from "@/lib/socket"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import ConversationDetailHeader from "@/components/dashboard/ConversationDetailHeader"
@@ -370,9 +370,23 @@ export default function ConversationDetail() {
 
     // ── socket: receive-message ─────────────────────────────────────────
     useEffect(() => {
-        const onMessage = (msg: Message) => {
+        const onMessage = (msg: Message & { clientTempId?: string }) => {
             if (msg.conversationId !== id) return
-            setMessageList((prev) => [...prev, msg])
+            setMessageList((prev) => {
+                // Reconcile against our own optimistic placeholder (added the
+                // instant we hit send, before the server round-trip) rather
+                // than appending a duplicate — matched by the tempId we sent
+                // and the server echoed back unchanged.
+                if (msg.clientTempId) {
+                    const pendingIdx = prev.findIndex((m) => m._id === msg.clientTempId)
+                    if (pendingIdx !== -1) {
+                        const next = [...prev]
+                        next[pendingIdx] = msg
+                        return next
+                    }
+                }
+                return [...prev, msg]
+            })
             // update sidebar latest message and bump to top
             setConversationsList((prev) => {
                 const idx = prev.findIndex((c) => c._id === id)
@@ -501,6 +515,28 @@ export default function ConversationDetail() {
         return () => { socket.off("message-deleted", onDeleted) }
     }, [id, setMessageList, setConversationsList])
 
+    // ── live edit / reaction sync ────────────────────────────────────────
+    useEffect(() => {
+        const onEdited = (data: { messageId: string; conversationId: string; text: string; editedAt: string }) => {
+            if (data.conversationId !== id) return
+            setMessageList((prev) =>
+                prev.map((m) => m._id === data.messageId ? { ...m, text: data.text, editedAt: data.editedAt } : m)
+            )
+        }
+        const onReaction = (data: { messageId: string; conversationId: string; reactions: Message["reactions"] }) => {
+            if (data.conversationId !== id) return
+            setMessageList((prev) =>
+                prev.map((m) => m._id === data.messageId ? { ...m, reactions: data.reactions } : m)
+            )
+        }
+        socket.on("message-edited", onEdited)
+        socket.on("message-reaction", onReaction)
+        return () => {
+            socket.off("message-edited", onEdited)
+            socket.off("message-reaction", onReaction)
+        }
+    }, [id, setMessageList])
+
     // ── sync typing indicator ────────────────────────────────────────────
     useEffect(() => {
         if (!id) return
@@ -573,6 +609,48 @@ export default function ConversationDetail() {
         [setMessageList]
     )
 
+    // ── edit handler ──────────────────────────────────────────────────────
+    // Edits (like deletes) go entirely over the socket, not REST — they only
+    // ever make sense from within an open chat, which is exactly where a
+    // socket connection already exists.
+    const handleEdit = useCallback(
+        (messageId: string, newText: string) => {
+            if (!id) return
+            emitEditMessage({ messageId, conversationId: id, text: newText })
+            // Optimistic local update — we won't receive our own socket echo back
+            setMessageList((prev) =>
+                prev.map((m) => m._id === messageId ? { ...m, text: newText, editedAt: new Date().toISOString() } : m)
+            )
+        },
+        [id, setMessageList]
+    )
+
+    // ── reaction handler ────────────────────────────────────────────────
+    const handleReact = useCallback(
+        (messageId: string, emoji: string) => {
+            if (!id || !user) return
+            emitReactMessage({ messageId, conversationId: id, emoji })
+            // Optimistic local toggle, mirroring the server's toggle/replace logic
+            setMessageList((prev) =>
+                prev.map((m) => {
+                    if (m._id !== messageId) return m
+                    const existing = m.reactions ?? []
+                    const mineIdx = existing.findIndex((r) => r.user === user._id)
+                    let next
+                    if (mineIdx === -1) {
+                        next = [...existing, { user: user._id, emoji }]
+                    } else if (existing[mineIdx].emoji === emoji) {
+                        next = existing.filter((_, i) => i !== mineIdx)
+                    } else {
+                        next = existing.map((r, i) => i === mineIdx ? { ...r, emoji } : r)
+                    }
+                    return { ...m, reactions: next }
+                })
+            )
+        },
+        [id, user, setMessageList]
+    )
+
     // ── clear chat handler ────────────────────────────────────────────────
     const handleClearChat = useCallback(async () => {
         if (!id) return
@@ -616,6 +694,7 @@ export default function ConversationDetail() {
             {/* Header */}
             <ConversationDetailHeader
                 receiver={receiver}
+                conversationId={id ?? ""}
                 onClearChat={handleClearChat}
                 onSelectMode={enterSelectMode}
                 isBlockedByMe={blockStatus.iBlockedThem}
@@ -660,6 +739,8 @@ export default function ConversationDetail() {
                                 onDelete={handleDelete}
                                 onStar={handleStar}
                                 onReply={setReplyingTo}
+                                onEdit={handleEdit}
+                                onReact={handleReact}
                                 selectMode={selectMode}
                                 selected={selectedIds.has(msg._id)}
                                 onToggleSelect={handleToggleSelect}

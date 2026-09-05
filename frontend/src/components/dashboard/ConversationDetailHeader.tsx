@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, MoreVertical, Bot, Trash2, CheckCircle, Ban } from "lucide-react"
+import { ArrowLeft, MoreVertical, Bot, Trash2, CheckCircle, Ban, Search, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Input } from "@/components/ui/input"
+import { messageApi } from "@/lib/api"
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -29,8 +31,17 @@ import {
 import { Separator } from "@/components/ui/separator"
 import type { User } from "@/hooks/use-auth"
 
+interface SearchResult {
+    _id: string
+    text?: string
+    conversationId: string
+    senderId?: { _id: string; name: string; profilePic: string }
+    createdAt: string
+}
+
 interface Props {
     receiver: User | null
+    conversationId: string
     onClearChat: () => void
     onSelectMode: () => void
     isBlockedByMe: boolean
@@ -57,10 +68,39 @@ function lastSeenText(receiver: User | null): string {
     return `Last seen ${new Date(receiver.lastSeen).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
 }
 
-export default function ConversationDetailHeader({ receiver, onClearChat, onSelectMode, isBlockedByMe, onBlock, onUnblock }: Props) {
+export default function ConversationDetailHeader({ receiver, conversationId, onClearChat, onSelectMode, isBlockedByMe, onBlock, onUnblock }: Props) {
     const navigate = useNavigate()
     const [profileOpen, setProfileOpen] = useState(false)
     const [clearOpen, setClearOpen] = useState(false)
+    const [searchOpen, setSearchOpen] = useState(false)
+    const [query, setQuery] = useState("")
+    const [results, setResults] = useState<SearchResult[]>([])
+    const [searching, setSearching] = useState(false)
+
+    // Debounced search-as-you-type, scoped to this conversation. The clear-
+    // on-empty case is debounced too (rather than calling setState directly
+    // in the effect body) so it composes with the same cleanup/cancellation.
+    useEffect(() => {
+        if (!searchOpen) return
+        const trimmed = query.trim()
+
+        const handle = setTimeout(() => {
+            if (!trimmed) { setResults([]); setSearching(false); return }
+            setSearching(true)
+            messageApi.search<{ results: SearchResult[] }>(trimmed, conversationId)
+                .then(({ results }) => setResults(results))
+                .catch(() => setResults([]))
+                .finally(() => setSearching(false))
+        }, 300)
+
+        return () => clearTimeout(handle)
+    }, [query, conversationId, searchOpen])
+
+    const jumpToResult = (messageId: string) => {
+        setSearchOpen(false)
+        setQuery("")
+        navigate(`/user/conversations/${conversationId}?highlight=${messageId}`)
+    }
 
     const name = receiver?.name ?? "..."
     const statusText = lastSeenText(receiver)
@@ -101,6 +141,17 @@ export default function ConversationDetailHeader({ receiver, onClearChat, onSele
                         </p>
                     </div>
                 </button>
+
+                {/* Search */}
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => setSearchOpen(true)}
+                    title="Search messages"
+                >
+                    <Search className="size-5" />
+                </Button>
 
                 {/* 3-dot dropdown */}
                 <DropdownMenu>
@@ -179,6 +230,46 @@ export default function ConversationDetailHeader({ receiver, onClearChat, onSele
                     </div>
                 </DialogContent>
             </Dialog>
+            {/* Search dialog */}
+            <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Search in conversation</DialogTitle>
+                    </DialogHeader>
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                        <Input
+                            autoFocus
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder="Search messages..."
+                            className="pl-8"
+                        />
+                        {searching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 animate-spin text-muted-foreground" />}
+                    </div>
+                    <div className="max-h-80 overflow-y-auto -mx-6 px-6 space-y-1">
+                        {query.trim() && !searching && results.length === 0 && (
+                            <p className="text-sm text-muted-foreground text-center py-6">No messages found.</p>
+                        )}
+                        {results.map((r) => (
+                            <button
+                                key={r._id}
+                                onClick={() => jumpToResult(r._id)}
+                                className="w-full text-left p-2 rounded-lg hover:bg-muted transition-colors"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium text-primary">{r.senderId?.name ?? "Unknown"}</span>
+                                    <span className="text-[10px] text-muted-foreground shrink-0">
+                                        {new Date(r.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                                    </span>
+                                </div>
+                                <p className="text-sm truncate text-foreground/90">{r.text}</p>
+                            </button>
+                        ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* Clear chat confirmation */}
             <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
                 <AlertDialogContent>

@@ -14,7 +14,7 @@ import { emitSendMessage, emitTyping, emitStopTyping } from "@/lib/socket"
 import { userApi } from "@/lib/api"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import type { Message } from "@/hooks/use-chat"
+import { useChat, type Message } from "@/hooks/use-chat"
 
 interface Props {
     conversationId: string
@@ -31,6 +31,7 @@ interface Props {
 const STOP_TYPING_DELAY = 1500
 
 export default function MessageInput({ conversationId, myId, receiverId, receiverName, isReceiverBot, isBlocked, blockedByThem, replyToMessage, onCancelReply }: Props) {
+    const { setMessageList } = useChat()
     const [text, setText] = useState("")
     const [uploading, setUploading] = useState(false)
     const [imageDialogOpen, setImageDialogOpen] = useState(false)
@@ -92,7 +93,33 @@ export default function MessageInput({ conversationId, myId, receiverId, receive
         if (!trimmed) return
         clearTimeout(stopTypingTimer.current!)
         emitStopTypingNow()
-        emitSendMessage({ conversationId, text: trimmed, replyTo: replyToMessage?._id ?? null })
+
+        // Optimistic UI: show the message immediately rather than waiting on
+        // the server round-trip; "receive-message" reconciles this placeholder
+        // with the real saved document once it arrives (matched by tempId).
+        const tempId = crypto.randomUUID()
+        const optimisticMessage: Message = {
+            _id: tempId,
+            conversationId,
+            senderId: myId,
+            text: trimmed,
+            seenBy: [],
+            hiddenFrom: [],
+            softDeleted: false,
+            replyTo: replyToMessage ? {
+                _id: replyToMessage._id,
+                text: replyToMessage.text,
+                imageUrl: replyToMessage.imageUrl,
+                senderId: replyToMessage.senderId,
+                softDeleted: replyToMessage.softDeleted,
+            } : null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            pending: true,
+        }
+        setMessageList((prev) => [...prev, optimisticMessage])
+
+        emitSendMessage({ conversationId, text: trimmed, replyTo: replyToMessage?._id ?? null, clientTempId: tempId })
         setText("")
         onCancelReply?.()
         textareaRef.current?.focus()

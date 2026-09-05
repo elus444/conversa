@@ -20,4 +20,15 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // shadcn/ui's generated components intentionally export a `*Variants`
+    // cva() helper alongside the component itself (e.g. `buttonVariants`)
+    // — a standard, safe pattern that only costs a bit of Fast Refresh
+    // granularity in these specific files, which react-refresh's linter
+    // otherwise flags everywhere it appears.
+    files: ['src/components/ui/**/*.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

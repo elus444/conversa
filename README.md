@@ -43,6 +43,7 @@ A full-stack, production-grade real-time chat application built with the MERN st
 - [Scripts](#scripts)
 - [Testing & CI](#testing--ci)
 - [Security Design](#security-design)
+- [Roadmap](#roadmap)
 - [Background Jobs](#background-jobs)
 - [License](#license)
 
@@ -66,6 +67,11 @@ A full-stack, production-grade real-time chat application built with the MERN st
 ### Messaging
 - **Real-time one-on-one chat** over Socket.IO
 - **Text and image messages** — images uploaded to Cloudflare R2 with optional caption text
+- **Rich text formatting** — markdown (bold, italics, links, lists, inline code, code blocks via `react-markdown` + `remark-gfm`) renders in every text message, not just AI replies
+- **Message pagination** — 50 messages per page, older ones load on scroll-to-top (`hasMore`-driven infinite scroll), backed by a compound `{conversationId, createdAt}` index so it stays fast regardless of history length
+- **Edit messages** — sender-only, text-only, over the socket (`edit-message` → `message-edited`); no edit history is kept, just an `editedAt` flag and an "edited" label
+- **Reactions** — one emoji per user per message; reacting again with the same emoji removes it, a different one replaces it (`react-message` → `message-reaction`)
+- **Full-text search** — `GET /message/search`, backed by a MongoDB text index on `Message.text`; scoped to one conversation or across every conversation the user is in
 - **Reply to message** — `replyTo` reference stored per message; displayed as quoted context in the UI
 - **Delete for me** — hard-removes a message from your view only (appended to `hiddenFrom`)
 - **Delete for everyone** — soft-delete sets `softDeleted: true`; message shows as *"This message was deleted"* tombstone for all members
@@ -75,6 +81,7 @@ A full-stack, production-grade real-time chat application built with the MERN st
 - **Seen receipts** — `seenBy` array tracks who read each message and when
 - **Unread counts** — per-user counters maintained on the `Conversation` document, reset on room join
 - **Latest message preview** — `latestmessage` field keeps the chat list up to date in real time
+- **Optimistic UI** — edits and reactions update the local view immediately on the actor's own screen rather than waiting on a round-trip; the socket broadcast is what syncs the other participant
 
 ### AI Chatbot
 - Every user gets a **personal AI Chatbot** conversation created automatically at registration
@@ -523,9 +530,9 @@ Two things worth calling out for anyone repeating this setup:
 
 ## Security Design
 
-- **JWT** — tokens are signed with `JWT_SECRET`, expire after 7 days, and are verified on every protected REST route and every socket connection
+- **JWT access + refresh tokens** — the access token (`authtoken`) is a short-lived JWT (15 min, `JWT_ACCESS_EXPIRY`), verified on every protected REST route and every socket connection exactly as before. Alongside it, `/auth/login` and `/auth/register` issue an opaque, high-entropy **refresh token**; only its SHA-256 hash is stored (`User.refreshTokenHash`), so reading the database alone can't be used to authenticate as the user. `POST /auth/refresh` exchanges a valid refresh token for a new access token *and rotates the refresh token itself* — the old one stops working the instant a new one is issued. `POST /auth/logout` revokes it server-side. The frontend (`lib/api.ts`) handles all of this transparently: every call goes through a wrapper that catches a `401`, refreshes once, and retries — callers never see the expiry.
 - **No trusted client IDs** — `senderId` is always taken from the verified JWT (`socket.userId`), never from the client payload
-- **bcrypt** — passwords and OTPs are hashed with bcrypt before storage
+- **bcrypt** — passwords and OTPs are hashed with bcrypt before storage (the refresh token uses SHA-256 instead — see above — since a high-entropy random token gets nothing from bcrypt's slow salted hashing, and direct hash lookup is what `/auth/refresh` needs)
 - **Block enforcement** — the server checks block status before processing every `send-message` event; a blocked sender receives `message-blocked` instead
 - **Conversation membership** — every `join-chat` and `send-message` handler verifies the authenticated user is a member of the target conversation
 - **Email verification gate** — the `DashboardLayout` component redirects unverified users to `/verify-email` before they can access any chat functionality; bot accounts are pre-verified at creation
@@ -535,7 +542,22 @@ Two things worth calling out for anyone repeating this setup:
 - **Non-root Docker user** — the backend container runs as an unprivileged `appuser`
 - **Account anonymisation** — deleted accounts have credentials wiped and PII replaced with generic values; the document is retained (flagged `isDeleted: true`) to preserve conversation context for other participants
 
+### CORS & CSRF
+
+- **CORS** (`CORS_ORIGIN`) is currently permissive (`*`) by default for easy local setup — set it to your frontend's exact origin in production (the deployed instance sets it to the live Cloudflare Pages URL). It only controls which **browser origins** may read the response; it is not an authentication mechanism.
+- **CSRF isn't applicable here by design**, not just by omission: authentication is a JWT sent in a custom `auth-token` header, read from `localStorage` — never a cookie. CSRF works by a browser *automatically* attaching credentials (cookies) to a cross-site request; since nothing here is cookie-based, there is no ambient credential for a forged request to ride along on, and no CSRF token is needed. The trade-off is the usual one for header/localStorage auth over cookies: it's not vulnerable to CSRF, but the token is readable by JavaScript, so an XSS bug would be able to steal it — React's default output-escaping is the primary defense against that.
+
 ---
+
+## Roadmap
+
+A few things deliberately weren't built, in the interest of shipping working features over rushed, shaky ones:
+
+- **OAuth (Google/GitHub login)** — needs OAuth apps registered with each provider (client ID/secret), which requires manual dashboard setup no API can do
+- **Message encryption at rest** — real end-to-end encryption would mean the server literally cannot read message content, which conflicts with the AI chatbot reading conversation history to reply; encryption-at-rest (server can decrypt, but the database itself holds only ciphertext) is the compatible middle ground and the more realistic next step
+- **Group conversations / thread branching** — the whole data model (`Conversation.members`, presence, unread counts) currently assumes exactly 2 participants; group chat is a genuine redesign, not an incremental add
+- **Redis-backed presence/caching** — `userSocketMap` is an in-memory `Map`, which works for a single instance but wouldn't survive horizontal scaling (multiple server instances need a shared store for socket-to-user mapping); Upstash's free tier would be the natural fit
+- **Analytics dashboard, load testing** — no engagement metrics or throughput numbers are collected; would be the next thing to add before treating this as more than a demo
 
 ## Background Jobs
 

@@ -22,8 +22,14 @@ export type Message = {
     softDeleted: boolean;
     starredBy?: string[];
     replyTo?: ReplyToPreview | null;
+    editedAt?: string | null;
+    reactions?: Array<{ user: string; emoji: string }>;
     createdAt: string;
     updatedAt: string;
+    // Optimistic-send placeholder, replaced once the server's copy arrives
+    // (see the "receive-message" reconciliation in ConversationDetail.tsx).
+    // Never true for anything that came from the server.
+    pending?: boolean;
 };
 
 export const useChatProvider = () => {

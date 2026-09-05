@@ -5,6 +5,8 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 const MONGO_URI = process.env.MONGO_URI;
 const MONGO_DB_NAME = process.env.MONGO_DB_NAME;
 const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || "15m";
+const JWT_REFRESH_EXPIRY_DAYS = Number(process.env.JWT_REFRESH_EXPIRY_DAYS) || 30;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -20,6 +22,8 @@ module.exports = {
   MONGO_URI,
   MONGO_DB_NAME,
   JWT_SECRET,
+  JWT_ACCESS_EXPIRY,
+  JWT_REFRESH_EXPIRY_DAYS,
   GEMINI_API_KEY,
   GEMINI_MODEL,
   RESEND_API_KEY,

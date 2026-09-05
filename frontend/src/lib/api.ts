@@ -19,6 +19,7 @@ export interface LoginPayload {
 
 export interface AuthTokenResponse {
     authtoken: string;
+    refreshToken?: string;
     user?: {
         _id: string;
         name: string;
@@ -55,12 +56,72 @@ export interface NonFriendsParams {
 /* ─── helpers ──────────────────────────────────────────────────────────── */
 
 const getToken = (): string => localStorage.getItem("auth-token") ?? "";
+const getRefreshToken = (): string => localStorage.getItem("refresh-token") ?? "";
+
+const storeTokens = (authtoken: string, refreshToken?: string) => {
+    localStorage.setItem("auth-token", authtoken);
+    if (refreshToken) localStorage.setItem("refresh-token", refreshToken);
+};
 
 const headers = (extra: Record<string, string> = {}): Record<string, string> => ({
     "Content-Type": "application/json",
     "auth-token": getToken(),
     ...extra,
 });
+
+// Access tokens are short-lived (15m) by design — this is what makes that
+// workable without constantly bouncing the user back to /login. Every call
+// in this file goes through apiFetch instead of the raw fetch(), so a 401
+// (expired access token) triggers exactly one silent refresh-and-retry
+// before the caller ever sees a failure. Concurrent 401s share a single
+// in-flight refresh call rather than each racing to refresh separately.
+let refreshInFlight: Promise<boolean> | null = null;
+
+const tryRefresh = (): Promise<boolean> => {
+    if (refreshInFlight) return refreshInFlight;
+
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return Promise.resolve(false);
+
+    refreshInFlight = fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+    })
+        .then(async (res) => {
+            if (!res.ok) return false;
+            const data = await res.json() as AuthTokenResponse;
+            storeTokens(data.authtoken, data.refreshToken);
+            return true;
+        })
+        .catch(() => false)
+        .finally(() => {
+            refreshInFlight = null;
+        });
+
+    return refreshInFlight;
+};
+
+const apiFetch = async (
+    url: string,
+    options: RequestInit = {},
+    isRetry = false
+): Promise<Response> => {
+    const res = await fetch(url, options);
+
+    if (res.status === 401 && !isRetry && getRefreshToken()) {
+        const refreshed = await tryRefresh();
+        if (refreshed) {
+            const retryOptions: RequestInit = {
+                ...options,
+                headers: { ...(options.headers as Record<string, string>), "auth-token": getToken() },
+            };
+            return apiFetch(url, retryOptions, true);
+        }
+    }
+
+    return res;
+};
 
 const handleResponse = async <T = unknown>(res: Response): Promise<T> => {
     const data = await res.json() as T & { error?: string };
@@ -86,7 +147,7 @@ export const authApi = {
         }).then((res) => handleResponse<AuthTokenResponse>(res)),
 
     getMe: <T = unknown>() =>
-        fetch(`${API_BASE}/auth/me`, {
+        apiFetch(`${API_BASE}/auth/me`, {
             headers: headers(),
         }).then((res) => handleResponse<T>(res)),
 
@@ -98,41 +159,53 @@ export const authApi = {
         }).then(handleResponse),
 
     sendVerificationOtp: () =>
-        fetch(`${API_BASE}/auth/send-verification-otp`, {
+        apiFetch(`${API_BASE}/auth/send-verification-otp`, {
             method: "POST",
             headers: headers(),
         }).then(handleResponse),
 
     verifyEmail: (otp: string) =>
-        fetch(`${API_BASE}/auth/verify-email`, {
+        apiFetch(`${API_BASE}/auth/verify-email`, {
             method: "POST",
             headers: headers(),
             body: JSON.stringify({ otp }),
         }).then(handleResponse),
+
+    logout: () =>
+        apiFetch(`${API_BASE}/auth/logout`, {
+            method: "POST",
+            headers: headers(),
+        }).then(handleResponse)
+            .catch(() => {
+                // Best-effort — the client clears its own tokens regardless,
+                // so a failed revocation call shouldn't block logging out.
+            }),
+
+    storeTokens,
 };
 
 /* ─── conversations ────────────────────────────────────────────────────── */
 
 export const conversationApi = {
     list: <T = unknown>() =>
-        fetch(`${API_BASE}/conversation/`, {
+        apiFetch(`${API_BASE}/conversation/`, {
             headers: headers(),
         }).then((res) => handleResponse<T>(res)),
 
     get: <T = unknown>(id: string) =>
-        fetch(`${API_BASE}/conversation/${id}`, {
+        apiFetch(`${API_BASE}/conversation/${id}`, {
             headers: headers(),
         }).then((res) => handleResponse<T>(res)),
 
     create: (memberIds: string[]) =>
-        fetch(`${API_BASE}/conversation/`, {
+        apiFetch(`${API_BASE}/conversation/`, {
             method: "POST",
             headers: headers(),
             body: JSON.stringify({ members: memberIds }),
         }).then(handleResponse),
 
     togglePin: (id: string) =>
-        fetch(`${API_BASE}/conversation/${id}/pin`, {
+        apiFetch(`${API_BASE}/conversation/${id}/pin`, {
             method: "POST",
             headers: headers(),
         }).then((res) => handleResponse<{ isPinned: boolean }>(res)),
@@ -142,47 +215,55 @@ export const conversationApi = {
 
 export const messageApi = {
     list: (conversationId: string, page: number = 1, limit: number = 50) =>
-        fetch(`${API_BASE}/message/${conversationId}?page=${page}&limit=${limit}`, {
+        apiFetch(`${API_BASE}/message/${conversationId}?page=${page}&limit=${limit}`, {
             headers: headers(),
         }).then(handleResponse),
 
     delete: (messageId: string, scope: "me" | "everyone") =>
-        fetch(`${API_BASE}/message/${messageId}`, {
+        apiFetch(`${API_BASE}/message/${messageId}`, {
             method: "DELETE",
             headers: headers(),
             body: JSON.stringify({ scope }),
         }).then(handleResponse),
 
     bulkDelete: (messageIds: string[]) =>
-        fetch(`${API_BASE}/message/bulk/hide`, {
+        apiFetch(`${API_BASE}/message/bulk/hide`, {
             method: "DELETE",
             headers: headers(),
             body: JSON.stringify({ messageIds }),
         }).then(handleResponse),
 
     clearChat: (conversationId: string) =>
-        fetch(`${API_BASE}/message/clear/${conversationId}`, {
+        apiFetch(`${API_BASE}/message/clear/${conversationId}`, {
             method: "POST",
             headers: headers(),
         }).then(handleResponse),
 
     toggleStar: (messageId: string) =>
-        fetch(`${API_BASE}/message/${messageId}/star`, {
+        apiFetch(`${API_BASE}/message/${messageId}/star`, {
             method: "POST",
             headers: headers(),
         }).then((res) => handleResponse<{ isStarred: boolean; starredBy: string[] }>(res)),
 
     getStarred: <T = unknown>() =>
-        fetch(`${API_BASE}/message/starred`, {
+        apiFetch(`${API_BASE}/message/starred`, {
             headers: headers(),
         }).then((res) => handleResponse<T>(res)),
+
+    search: <T = unknown>(q: string, conversationId?: string) => {
+        const qs = new URLSearchParams({ q });
+        if (conversationId) qs.set("conversationId", conversationId);
+        return apiFetch(`${API_BASE}/message/search?${qs.toString()}`, {
+            headers: headers(),
+        }).then((res) => handleResponse<T>(res));
+    },
 };
 
 /* ─── users ────────────────────────────────────────────────────────────── */
 
 export const userApi = {
     getOnlineStatus: (userId: string) =>
-        fetch(`${API_BASE}/user/online-status/${userId}`, {
+        apiFetch(`${API_BASE}/user/online-status/${userId}`, {
             headers: headers(),
         }).then(handleResponse),
 
@@ -192,43 +273,43 @@ export const userApi = {
         if (params.sort)   qs.set("sort",   params.sort)
         if (params.page)   qs.set("page",   String(params.page))
         if (params.limit)  qs.set("limit",  String(params.limit))
-        return fetch(`${API_BASE}/user/non-friends?${qs.toString()}`, {
+        return apiFetch(`${API_BASE}/user/non-friends?${qs.toString()}`, {
             headers: headers(),
         }).then(handleResponse)
     },
 
     updateProfile: (payload: UpdateProfilePayload) =>
-        fetch(`${API_BASE}/user/update`, {
+        apiFetch(`${API_BASE}/user/update`, {
             method: "PUT",
             headers: headers(),
             body: JSON.stringify(payload),
         }).then(handleResponse),
 
     getPresignedUrl: (filename: string, filetype: string, filesize: number) =>
-        fetch(
+        apiFetch(
             `${API_BASE}/user/presigned-url?filename=${encodeURIComponent(filename)}&filetype=${encodeURIComponent(filetype)}&filesize=${filesize}`,
             { headers: headers() }
         ).then(handleResponse),
 
     blockUser: (userId: string) =>
-        fetch(`${API_BASE}/user/block/${userId}`, {
+        apiFetch(`${API_BASE}/user/block/${userId}`, {
             method: "POST",
             headers: headers(),
         }).then(handleResponse),
 
     unblockUser: (userId: string) =>
-        fetch(`${API_BASE}/user/block/${userId}`, {
+        apiFetch(`${API_BASE}/user/block/${userId}`, {
             method: "DELETE",
             headers: headers(),
         }).then(handleResponse),
 
     getBlockStatus: (userId: string) =>
-        fetch(`${API_BASE}/user/block-status/${userId}`, {
+        apiFetch(`${API_BASE}/user/block-status/${userId}`, {
             headers: headers(),
         }).then((res) => handleResponse<{ iBlockedThem: boolean; theyBlockedMe: boolean }>(res)),
 
     deleteAccount: () =>
-        fetch(`${API_BASE}/user/delete`, {
+        apiFetch(`${API_BASE}/user/delete`, {
             method: "DELETE",
             headers: headers(),
         }).then(handleResponse),

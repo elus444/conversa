@@ -25,5 +25,9 @@ const ConversationSchema = new mongoose.Schema(
   }
 );
 
+// conversation-controller.js finds/lists conversations by member and sorts
+// by recency — this compound index covers both in one pass.
+ConversationSchema.index({ members: 1, updatedAt: -1 });
+
 const Conversation = mongoose.model("Conversation", ConversationSchema);
 module.exports = Conversation;
