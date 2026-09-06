@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Copy, Trash2, Check, CheckCheck, CheckCircle2, Circle, Star, Reply, Pencil, SmilePlus, X, Clock } from "lucide-react"
@@ -112,8 +113,13 @@ export default function SingleMessage({ message, isMine, isBot, receiverId, myId
 
     return (
         <>
-            <div
+            <motion.div
+                layout="position"
                 data-message-id={message._id}
+                initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
+                transition={{ type: "spring", stiffness: 500, damping: 35 }}
                 className={cn(
                     "group flex flex-col gap-1",
                     isMine ? "ml-auto items-end max-w-[75%]" : isBot ? "mr-auto items-start max-w-[85%]" : "mr-auto items-start max-w-[75%]",
@@ -333,24 +339,33 @@ export default function SingleMessage({ message, isMine, isBot, receiverId, myId
                 {/* Reaction pills */}
                 {Object.keys(reactionGroups).length > 0 && (
                     <div className={cn("flex flex-wrap gap-1", isMine && "justify-end")}>
-                        {Object.entries(reactionGroups).map(([emoji, { count, mine }]) => (
-                            <button
-                                key={emoji}
-                                onClick={() => onReact(message._id, emoji)}
-                                title={mine ? "Remove your reaction" : "React"}
-                                className={cn(
-                                    "flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition-colors",
-                                    mine ? "bg-primary/10 border-primary/40" : "bg-muted border-transparent hover:border-foreground/20"
-                                )}
-                            >
-                                <span>{emoji}</span>
-                                {count > 1 && <span className="text-muted-foreground">{count}</span>}
-                                {mine && <X className="size-2.5 opacity-50" />}
-                            </button>
-                        ))}
+                        <AnimatePresence initial={false}>
+                            {Object.entries(reactionGroups).map(([emoji, { count, mine }]) => (
+                                <motion.button
+                                    key={emoji}
+                                    layout
+                                    initial={{ opacity: 0, scale: 0.5 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.5 }}
+                                    whileHover={{ scale: 1.08 }}
+                                    whileTap={{ scale: 0.92 }}
+                                    transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                                    onClick={() => onReact(message._id, emoji)}
+                                    title={mine ? "Remove your reaction" : "React"}
+                                    className={cn(
+                                        "flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs transition-colors",
+                                        mine ? "bg-primary/10 border-primary/40" : "bg-muted border-transparent hover:border-foreground/20"
+                                    )}
+                                >
+                                    <span>{emoji}</span>
+                                    {count > 1 && <span className="text-muted-foreground">{count}</span>}
+                                    {mine && <X className="size-2.5 opacity-50" />}
+                                </motion.button>
+                            ))}
+                        </AnimatePresence>
                     </div>
                 )}
-            </div>
+            </motion.div>
 
             {/* Delete Dialog */}
             <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>

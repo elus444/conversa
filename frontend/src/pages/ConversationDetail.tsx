@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from "react"
+import { AnimatePresence } from "framer-motion"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useAuth } from "@/hooks/use-auth"
 import { useChat, type Message } from "@/hooks/use-chat"
@@ -729,33 +730,35 @@ export default function ConversationDetail() {
                         <p className="text-sm">No messages yet. Say hi! 👋</p>
                     </div>
                 ) : (
-                    grouped.map((item, idx) => {
-                        if (typeof item === "string") {
-                            return <DateDivider key={`div-${idx}`} date={item} />
-                        }
-                        const msg = item as Message
-                        const isMine = msg.senderId === user?._id
-                        return (
-                            <SingleMessage
-                                key={msg._id}
-                                message={msg}
-                                isMine={isMine}
-                                isBot={receiver?.isBot && !isMine}
-                                receiverId={receiver?._id ?? ""}
-                                myId={user?._id ?? ""}
-                                receiverName={receiver?.name ?? ""}
-                                onDelete={handleDelete}
-                                onStar={handleStar}
-                                onReply={setReplyingTo}
-                                onEdit={handleEdit}
-                                onReact={handleReact}
-                                selectMode={selectMode}
-                                selected={selectedIds.has(msg._id)}
-                                onToggleSelect={handleToggleSelect}
-                                highlighted={highlightedMessageId === msg._id}
-                            />
-                        )
-                    })
+                    <AnimatePresence initial={false}>
+                        {grouped.map((item, idx) => {
+                            if (typeof item === "string") {
+                                return <DateDivider key={`div-${idx}`} date={item} />
+                            }
+                            const msg = item as Message
+                            const isMine = msg.senderId === user?._id
+                            return (
+                                <SingleMessage
+                                    key={msg._id}
+                                    message={msg}
+                                    isMine={isMine}
+                                    isBot={receiver?.isBot && !isMine}
+                                    receiverId={receiver?._id ?? ""}
+                                    myId={user?._id ?? ""}
+                                    receiverName={receiver?.name ?? ""}
+                                    onDelete={handleDelete}
+                                    onStar={handleStar}
+                                    onReply={setReplyingTo}
+                                    onEdit={handleEdit}
+                                    onReact={handleReact}
+                                    selectMode={selectMode}
+                                    selected={selectedIds.has(msg._id)}
+                                    onToggleSelect={handleToggleSelect}
+                                    highlighted={highlightedMessageId === msg._id}
+                                />
+                            )
+                        })}
+                    </AnimatePresence>
                 )}
 
                 {/* Typing indicator — hidden once bot starts streaming */}

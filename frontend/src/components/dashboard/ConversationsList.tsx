@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { useNavigate, useParams } from "react-router-dom"
 import { Search, MessageCircle, Bot, SquarePen, ChevronDown, Trash2, ShieldX, Pin, PinOff } from "lucide-react"
 import { useConversations, type Conversation } from "@/hooks/use-conversations"
@@ -89,7 +90,14 @@ function ConversationRow({ conv, myId, isActive, isTyping, onClick, openDropdown
     const isPinned = conv.isPinned
 
     return (
-        <div className="relative group">
+        <motion.div
+            layout
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -12, height: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="relative group"
+        >
             {/* Hover dropdown — absolutely positioned, takes no layout space */}
             {!other?.isBot && (
                 <div
@@ -135,11 +143,13 @@ function ConversationRow({ conv, myId, isActive, isTyping, onClick, openDropdown
                     </DropdownMenu>
                 </div>
             )}
-            <div
+            <motion.div
                 role="button"
                 tabIndex={0}
                 onClick={onClick}
                 onKeyDown={(e) => e.key === "Enter" && onClick()}
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.98 }}
                 className={cn(
                     "w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-colors cursor-pointer",
                     isActive
@@ -185,15 +195,23 @@ function ConversationRow({ conv, myId, isActive, isTyping, onClick, openDropdown
                         >
                             {preview}
                         </p>
-                        {unread > 0 && !isTyping && (
-                            <span className="shrink-0 flex bg-primary items-center justify-center min-w-5 h-5 rounded-full text-white text-[10px] font-bold px-1">
-                                {unread > 99 ? "99+" : unread}
-                            </span>
-                        )}
+                        <AnimatePresence>
+                            {unread > 0 && !isTyping && (
+                                <motion.span
+                                    initial={{ scale: 0, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0, opacity: 0 }}
+                                    transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                                    className="shrink-0 flex bg-primary items-center justify-center min-w-5 h-5 rounded-full text-white text-[10px] font-bold px-1"
+                                >
+                                    {unread > 99 ? "99+" : unread}
+                                </motion.span>
+                            )}
+                        </AnimatePresence>
                     </div>
                 </div>
-            </div>
-        </div>
+            </motion.div>
+        </motion.div>
     )
 }
 
@@ -369,22 +387,24 @@ export default function ConversationsList() {
                             </p>
                         </div>
                     ) : (
-                        displayList.map((conv) => (
-                            <ConversationRow
-                                key={conv._id}
-                                conv={conv}
-                                myId={user?._id ?? ""}
-                                isActive={conv._id === activeId}
-                                isTyping={!!typingConversations[conv._id]}
-                                onClick={() => navigate(`/user/conversations/${conv._id}`)}
-                                openDropdownId={openDropdownId}
-                                setOpenDropdownId={setOpenDropdownId}
-                                onToggleBlock={handleToggleBlock}
-                                onClearChat={handleClearChatRow}
-                                onTogglePin={handleTogglePin}
-                                blockedUsers={blockedUsers}
-                            />
-                        ))
+                        <AnimatePresence initial={false}>
+                            {displayList.map((conv) => (
+                                <ConversationRow
+                                    key={conv._id}
+                                    conv={conv}
+                                    myId={user?._id ?? ""}
+                                    isActive={conv._id === activeId}
+                                    isTyping={!!typingConversations[conv._id]}
+                                    onClick={() => navigate(`/user/conversations/${conv._id}`)}
+                                    openDropdownId={openDropdownId}
+                                    setOpenDropdownId={setOpenDropdownId}
+                                    onToggleBlock={handleToggleBlock}
+                                    onClearChat={handleClearChatRow}
+                                    onTogglePin={handleTogglePin}
+                                    blockedUsers={blockedUsers}
+                                />
+                            ))}
+                        </AnimatePresence>
                     )}
                 </div>
             </div>
