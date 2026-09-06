@@ -10,6 +10,14 @@ const rateLimit = require("express-rate-limit");
 
 const app = express();
 
+// Render (and most PaaS hosts) sit the app behind a reverse proxy, so every
+// request arrives from that proxy's IP with the real client IP only in
+// X-Forwarded-For. Without this, express-rate-limit either refuses to trust
+// that header (logging a warning on every request) or — worse — buckets
+// every visitor together under the proxy's one IP, making the limiter
+// useless. `1` trusts exactly one hop, matching Render's setup.
+app.set("trust proxy", 1);
+
 app.use(helmet());
 app.use(cors());
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
