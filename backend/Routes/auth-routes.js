@@ -10,6 +10,8 @@ const {
   verifyEmail,
   refreshAccessToken,
   logout,
+  forgotPassword,
+  resetPassword,
 } = require("../Controllers/auth-controller.js");
 const fetchuser = require("../middleware/fetchUser.js");
 
@@ -17,6 +19,8 @@ router.post("/register", register);
 router.post("/login", login);
 router.post("/getotp", sendotp);
 router.post("/refresh", refreshAccessToken);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password", resetPassword);
 router.get("/me", fetchuser, authUser);
 router.post("/send-verification-otp", fetchuser, sendVerificationOtp);
 router.post("/verify-email", fetchuser, verifyEmail);

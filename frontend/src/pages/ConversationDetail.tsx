@@ -543,7 +543,7 @@ export default function ConversationDetail() {
             socket.off("message-edited", onEdited)
             socket.off("message-reaction", onReaction)
         }
-    }, [id, setMessageList])
+    }, [id, setMessageList, setConversationsList])
 
     // ── sync typing indicator ────────────────────────────────────────────
     useEffect(() => {

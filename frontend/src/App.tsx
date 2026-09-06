@@ -12,6 +12,7 @@ import ConversationLayout from "./components/layout/ConversationLayout";
 // JS just to see the landing page).
 const Home = lazy(() => import("./pages/Home"));
 const Login = lazy(() => import("./pages/Login"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 const User = lazy(() => import("./pages/User"));
@@ -45,6 +46,7 @@ export function App() {
         <Route element={<MainLayout />}>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/signup" element={<SignUp />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route element={<DashboardLayout />}>

@@ -38,6 +38,16 @@ const Userschema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Separate from `otp` above (shared by login-OTP and email verification)
+    // so a pending password reset can't collide with either of those flows.
+    resetPasswordOtp: {
+      type: String,
+      default: "",
+    },
+    resetPasswordOtpExpiry: {
+      type: Date,
+      default: null,
+    },
     isOnline: {
       type: Boolean,
       default: false,

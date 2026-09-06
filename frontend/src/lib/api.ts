@@ -175,6 +175,20 @@ export const authApi = {
         apiFetch(`${API_BASE}/auth/logout`, {
             method: "POST",
             headers: headers(),
+        }).then(handleResponse),
+
+    forgotPassword: (email: string) =>
+        fetch(`${API_BASE}/auth/forgot-password`, {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({ email }),
+        }).then(handleResponse),
+
+    resetPassword: (payload: { email: string; otp: string; newPassword: string }) =>
+        fetch(`${API_BASE}/auth/reset-password`, {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify(payload),
         }).then(handleResponse)
             .catch(() => {
                 // Best-effort — the client clears its own tokens regardless,
